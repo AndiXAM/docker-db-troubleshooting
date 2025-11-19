@@ -1,0 +1,80 @@
+name: Create BookStack Page on New Issue
+
+on:
+  issues:
+    types: [opened] # Скрипт сработает, когда вы создадите новую задачу
+
+jobs:
+  createPage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Create page in BookStack
+        env:
+          BOOKSTACK_API_ID: ${{ secrets.BOOKSTACK_API_ID }}
+          BOOKSTACK_API_SECRET: ${{ secrets.BOOKSTACK_API_SECRET }}
+          BOOKSTACK_URL: ${{ secrets.BOOKSTACK_URL }}
+          BOOKSTACK_BOOK_ID: ${{ secrets.BOOKSTACK_BOOK_ID }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          # Создаем папку и инициализируем проект
+          mkdir kcs-script
+          cd kcs-script
+          npm init -y > /dev/null
+          # Устанавливаем библиотеки для конвертации текста и запросов
+          npm install marked node-fetch@2
+
+          # Создаем JS-файл с логикой
+          cat <<EOF > index.js
+          const fetch = require('node-fetch');
+          const marked = require('marked');
+
+          const title = process.env.ISSUE_TITLE;
+          const bodyRaw = process.env.ISSUE_BODY || 'Нет описания';
+          const issueUrl = process.env.ISSUE_URL;
+
+          // Конвертируем Markdown из Issue в HTML для BookStack
+          const htmlContent = marked.parse(bodyRaw);
+
+          // Добавляем ссылку на оригинал задачи в начало статьи
+          const finalHtml = \`<p><strong>Источник (GitHub Issue):</strong> <a href="\${issueUrl}">\${issueUrl}</a></p>\n\${htmlContent}\`;
+
+          const payload = {
+            name: title,
+            book_id: process.env.BOOKSTACK_BOOK_ID,
+            html: finalHtml
+          };
+
+          const apiUrl = process.env.BOOKSTACK_URL + '/api/pages';
+          const token = process.env.BOOKSTACK_API_ID + ':' + process.env.BOOKSTACK_API_SECRET;
+
+          console.log('Отправка запроса на:', apiUrl);
+
+          fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Token ' + token,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          })
+          .then(res => {
+              if (!res.ok) {
+                  return res.text().then(text => { throw new Error(text) });
+              }
+              console.log('Статья успешно создана!');
+          })
+          .catch(err => {
+              console.error('Ошибка создания страницы:', err);
+              process.exit(1);
+          });
+          EOF
+
+          # Запускаем скрипт
+          node index.js
